@@ -1,192 +1,136 @@
 # -*- coding: utf-8 -*-
 """
-Created on Fri Jun 26 20:19:12 2020
+Created on Thu Jul 30 20:58:51 2020
 
 @author: senor
 """
 
 from scrapy import Selector
-import numpy as np, tkinter as tk, requests, collections, itertools
+import numpy as np, requests, collections, itertools
+url = 'http://www.menneske.no/sudoku/eng/showpuzzle.html?number=2079924'
+print('url working:', requests.get(url).ok)
+html = requests.get(url).content
+sel = Selector(text=html)
+xpath = '//*[@id="bodycol"]/div[2]/div/table//*[@class="grid"]/*/text()'
 
-class visual_sudoku():
-    def __init__(self):
-        self.optionwindow = tk.Tk()
-        self.optionwindow.title('Option Select')
-        self.optionwindow.geometry('250x400+750+100')
-        self.optionwindow.minsize(250, 400)
-        self.optionwindow.maxsize(250, 400)
-        self.optioncanvas = tk.Canvas(self.optionwindow, width=250, height=400)
-        self.optioncanvas.pack(fill=tk.BOTH)
-        self.option_select()
-        self.optionwindow.mainloop()
+sudoku = np.array([0 if i == '\xa0' else int(i) for i in sel.xpath(xpath).extract()]).reshape(9, 9).astype(object) #changed to object
+sudoku_replica = sudoku * 1
+
+sectors = [sudoku_replica[rows*3:rows*3+3, cols*3:cols*3+3] for rows in range(3) for cols in range(3)]
+
+
+def solution_table():
+    for row in range(9):
+        for col, cell in enumerate(sudoku[row]):
+            if cell == 0:
+                sector = sudoku[row//3*3:row//3*3+3,col//3*3:col//3*3+3]
+                not_values = np.unique(list(sudoku[row][sudoku[row]!=0])+list(sudoku[:,col][sudoku[:,col]!=0])+list(sector[sector!=0].flatten()))
+                possible_values, counts= np.unique([1,2,3,4,5,6,7,8,9] + list(not_values), return_counts=True)
+                sudoku_replica[row, col] = list(possible_values[counts==1])
+    pass
+
+solution_table()
+
+original_table = sudoku_replica * 1
+
+
+def replica_updater(row, col, solution):
+    print('a')
+    sudoku[row, col] = solution
+    sudoku_replica[row, col] = solution
+    for col2, cell in enumerate(sudoku_replica[row]):
+        if type(cell)==list and solution in cell:
+            sudoku_replica[row, col2].remove(solution)
+    for row2, cell in enumerate(sudoku_replica[:,col]):
+        if type(cell)==list and solution in cell:
+            sudoku_replica[row2, col].remove(solution)
+    for pos2, cell in enumerate(sudoku_replica[row//3*3:row//3*3+3,col//3*3:col//3*3+3].flatten()):
+        if type(cell)==list and solution in cell:
+            row2, col2 = row//3*3 + pos2//3, col//3*3 + pos2%3
+            sudoku_replica[row2, col2].remove(solution)
+    pass
+
+
+def difficulty_1(solve):
+    for pos, cell in enumerate(sudoku_replica.flatten()):
+        if type(cell)==list and len(cell)==1:
+            row = pos//9
+            col = pos%9
+            solution = int(cell[0])
+            #np.flatten() does not work with index, some issue with my code
+            #but also issues with np.int32 == [np.int32] returns '[ True]'
+            #overall it is unreliable
+            #fixes:
+                #used int as opposed to np.int32
+                #used enumerate and pos
+            
+            replica_updater(row, col, solution)
+            return(difficulty_1(True))
+    return solve
+
+
+def difficulty_2(solve):
     
-    
-    def option_select(self):
-        label_puzzle_num = tk.Label(self.optioncanvas, text='Puzzle Num:')
-        label_puzzle_num.place(relx=0.4, rely=0.45, anchor=tk.E)
-        text_puzzle_num = tk.Text(self.optioncanvas, height=1, width=15)
-        text_puzzle_num.insert(tk.END, 'random')
-        text_puzzle_num.place(relx=0.4, rely=0.45, anchor=tk.W)
-        
-        label_difficulty = tk.Label(self.optioncanvas, text='Difficulty:')
-        label_difficulty.place(relx=0.4, rely=0.5, anchor=tk.E)
-        difficulty = tk.IntVar()
-        difficulty.set(1)
-        option_difficulty = tk.OptionMenu(self.optioncanvas, difficulty, *list(range(1, 10)))
-        option_difficulty.config(indicator=False, relief=tk.FLAT)
-        option_difficulty.place(relx=0.43, rely=0.5, anchor=tk.CENTER)
-        
-        button_view = tk.Button(self.optioncanvas, text='View', font=('Helvetica', '20'), command=lambda: [button_view.destroy(), validate_puzzle_num(self, text_puzzle_num.get("1.0", 'end-1c'), difficulty.get())])
-        button_view.place(relx=0.5, rely=0.6, anchor=tk.CENTER)
-        
-        def validate_puzzle_num(self, puzzle_num, difficulty):
-            if puzzle_num == 'random':
-                url = 'http://www.menneske.no/sudoku/eng/random.html?diff=' + str(difficulty)
-            elif puzzle_num.isdigit() and 1 <= int(puzzle_num) <= 6913752:
-                url = 'http://www.menneske.no/sudoku/eng/showpuzzle.html?number=' + str(int(puzzle_num))
-            else:
-                label_error = tk.Label(self.optioncanvas, text='Invalid Puzzle Number; must be "random" or an integer between 1 and 6913752 (inclusive)', fg='red', wraplength=225)
-                label_error.place(relx=0.5, rely=0.3, anchor=tk.CENTER)
-                return
-            self.new_window(url)
-            pass        
-        pass
-    
-    
-    def new_window(self, url):
-        
-        self.window = tk.Tk()
-        self.window.title('Sudoku')
-        self.window.geometry('500x500+1000+100')
-        self.window.minsize(500, 500)
-        self.window.maxsize(500, 500)
-        self.canvas = tk.Canvas(self.window, width=500, height=500)
-        self.canvas.pack(fill=tk.BOTH)
-        self.window.update()
-        
-        def set_gridlines():
-            for pos in range(25, 500, 50):
-                if (pos-25)%150 == 0:
-                    self.canvas.create_line(25, pos, 475, pos, width=3)
-                    self.canvas.create_line(pos, 25, pos, 475, width=3)
-                    self.window.update()
-                else:
-                    self.canvas.create_line(25, pos, 475, pos)
-                    self.canvas.create_line(pos, 25, pos, 475)
-                    self.window.update()
-            pass
-        
-        set_gridlines()
-        
-        html = requests.get(url).content
-        sel = Selector(text=html)
-        xpath = '//*[@id="bodycol"]/div[2]/div/table//*[@class="grid"]/*/text()'
-        
-        self.sudoku = np.array([0 if i == '\xa0' else int(i) for i in sel.xpath(xpath).extract()]).reshape(9, 9).astype(object)
-        self.sudoku_replica = self.sudoku * 1
-        
-        self.display_sudoku(self.sudoku, 'sudoku')
-        
-        button_solve = tk.Button(self.optioncanvas, text='Solve', font=('Helvetica', '20'), command=lambda: self.solve())
-        button_solve.place(relx=0.5, rely=0.6, anchor=tk.CENTER)
-        
-        self.window.mainloop()
-        pass
-    
-    
-    def display_sudoku(self, array, array_type):
-        if array_type != 'sudoku':
-            sudoku_replica_dict = dict()
-            pass
-        for row, row_values in enumerate(array):
-            for col, cell in enumerate(row_values):
-                if array_type == 'sudoku':
-                    if cell != 0:
-                        tk.Label(self.canvas, text=cell, font=('Helvetica, 15')).place(x=(row+1)*50, y=(col+1)*50, anchor=tk.CENTER)
-                else:
-                    if type(cell) == list:
-                        for num in cell:
-                            small_cell = tk.Label(self.canvas, text=num, font=('Helvetica, 7'))
-                            small_cell.place(x=(row)*50+35+(num-1)%3*15, y=(col)*50+37+(num-1)//3*14, anchor=tk.CENTER)
-                            if (row, col) not in sudoku_replica_dict: # added num
-                                sudoku_replica_dict[(row, col)] = list()
-                            sudoku_replica_dict[(row, col)].append([num, small_cell])
-                
-                self.window.update()
-        
-        if array_type != 'sudoku':
-            return sudoku_replica_dict
-        pass
-    
-    
-    def solve(self):
-        
-        sudoku = self.sudoku
-        sudoku_replica = self.sudoku_replica
-        
-        def solution_table():
-            for row in range(9):
-                for col, cell in enumerate(sudoku[row]):
-                    if cell == 0:
-                        sector = sudoku[row//3*3:row//3*3+3,col//3*3:col//3*3+3]
-                        not_values = np.unique(list(sudoku[row][sudoku[row]!=0])+list(sudoku[:,col][sudoku[:,col]!=0])+list(sector[sector!=0].flatten()))
-                        possible_values, counts= np.unique([1,2,3,4,5,6,7,8,9] + list(not_values), return_counts=True)
-                        sudoku_replica[row, col] = list(possible_values[counts==1])
-            pass
-        
-        solution_table()
-        
-        sudoku_replica_dict = self.display_sudoku(sudoku_replica, None)
-        
-        def main():
-        
-            def replica_updater(row, col, solution):
-                for col2, cell in enumerate(sudoku_replica[row]):
+    for row, row_values in enumerate(sudoku_replica):
+        unique_row_values = [possible_values for cell in row_values if isinstance(cell,list) for possible_values in cell]
+        unique_row_values, counts = np.unique(unique_row_values, return_counts=True)
+        unique_row_values = unique_row_values[counts==1]
+        if len(unique_row_values) != 0:
+            for solution in unique_row_values:
+                for col, cell in enumerate(row_values):
                     if type(cell)==list and solution in cell:
-                        sudoku_replica[row, col2].remove(solution)
-                for row2, cell in enumerate(sudoku_replica[:,col]):
+                        
+                        replica_updater(row, col, int(solution))
+                        return(difficulty_2(True))
+    
+    for col, col_values in enumerate(sudoku_replica.T):
+        unique_col_values = [possible_values for cell in col_values if isinstance(cell,list) for possible_values in cell]
+        unique_col_values, counts = np.unique(unique_col_values, return_counts=True)
+        unique_col_values = unique_col_values[counts==1]
+        if len(unique_col_values) != 0:
+            for solution in unique_col_values:
+                for row, cell in enumerate(col_values):
                     if type(cell)==list and solution in cell:
-                        sudoku_replica[row2, col].remove(solution)
-                for pos2, cell in enumerate(sudoku_replica[row//3*3:row//3*3+3,col//3*3:col//3*3+3].flatten()):
+                        
+                        replica_updater(row, col, int(solution))
+                        return(difficulty_2(True))
+    
+    for sector_num, sector_values in enumerate(sectors):
+        unique_sector_values = [possible_values for cell in sector_values.flatten() if isinstance(cell,list) for possible_values in cell]
+        unique_sector_values, counts = np.unique(unique_sector_values, return_counts=True)
+        unique_sector_values = unique_sector_values[counts==1]
+        if len(unique_sector_values) != 0:
+            for solution in unique_sector_values:
+                for pos, cell in enumerate(sector_values.flatten()):
                     if type(cell)==list and solution in cell:
-                        row2, col2 = row//3*3 + pos2//3, col//3*3 + pos2%3
-                        sudoku_replica[row2, col2].remove(solution)
-                pass
-            
-            def difficulty_1(solve):
-                for cell in sudoku_replica.flatten():
-                    if type(cell)==list and len(cell)==1:
-                        row = list(sudoku_replica.flatten()).index(cell)//9
-                        col = list(sudoku_replica.flatten()).index(cell)%9
-                        sudoku[row, col] = cell[0]
-                        sudoku_replica[row, col] = int(cell[0])
-                        replica_updater(row, col, cell[0])
-                        for label in sudoku_replica_dict[(row, col)]:
-                            label[1].destroy()
-                            pass
-                        tk.Label(self.canvas, text=cell, font=('Helvetica, 15')).place(x=(row+1)*50, y=(col+1)*50, anchor=tk.CENTER)
-                        return(difficulty_1(True))
-                return solve
-            
-            solve_1 = difficulty_1(False)
-            
-            if solve_1:
-                return(main())
-            
-            pass
-        
-        
-        main()
-        
-        # for cell in sudoku_replica_dict.values():
-            # for small_cell in cell:
-                # print(small_cell)
-            # pass
-        
-        self.window.mainloop()
-        
-        pass
+                        row, col = pos//3 + sector_num//3*3, pos%3 + sector_num%3*3
+                        
+                        replica_updater(row, col, int(solution))
+                        return(difficulty_2(True))
+    return solve
+
+
+def main():
+    
+    if list(sudoku.flatten()).count(0) == 0:
+        print('sudoku solved')
+    
+    difficulty_1(False)
+    difficulty_2(False)
     
     pass
 
-my_class = visual_sudoku()
+
+if __name__ == '__main__':
+    main()
+
+
+puzzle_num = sel.xpath('//*[@id="bodycol"]/div[2]/div/text()[1]').extract()
+url = 'http://www.menneske.no/sudoku/eng/solution.html?number=' + puzzle_num[0].split()[3]
+xpath = '//*[@id="bodycol"]/div[2]/div/table//*[@class="grid"]/*/text()'
+print('url working:', requests.get(url).ok)
+html = requests.get(url).content
+sel = Selector(text=html)
+sudoku_solution = np.array(sel.xpath(xpath).extract(), dtype=int).reshape(9,9)
+if np.array_equal(sudoku, sudoku_solution) == True: print('solution is correct')
+else: print('solution is incorrect, puzzle num:', puzzle_num[0].split()[3])
